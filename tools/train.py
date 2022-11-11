@@ -105,7 +105,10 @@ def main():
         logger.info(train_dataset.get_info())
     else:
         raise ValueError("Not supported dataset type.")
-
+    
+    # 수정시작
+    print(train_dataset.crop_size)
+    return 0
     trainloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=config.TRAIN.BATCH_SIZE_PER_GPU*len(gpus),
