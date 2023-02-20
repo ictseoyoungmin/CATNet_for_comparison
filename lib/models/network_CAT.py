@@ -466,10 +466,10 @@ class CAT_Net(nn.Module):
         RGB, DCTcoef = x[:, :3, :, :], x[:, 3:, :, :]
 
         # RGB Stream
-        x = self.conv1(RGB)
+        x = self.conv1(RGB)#256
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.conv2(x)
+        x = self.conv2(x)# 128
         x = self.bn2(x)
         x = self.relu(x)
         x = self.layer1(x)
@@ -584,6 +584,6 @@ class CAT_Net(nn.Module):
 
 def get_seg_model(cfg, **kwargs):
     model = CAT_Net(cfg, **kwargs)
-    model.init_weights(cfg.MODEL.PRETRAINED_RGB, cfg.MODEL.PRETRAINED_DCT)
+    # model.init_weights(cfg.MODEL.PRETRAINED_RGB, cfg.MODEL.PRETRAINED_DCT)
 
     return model

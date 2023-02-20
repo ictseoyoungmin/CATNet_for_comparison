@@ -34,6 +34,8 @@ from lib.utils.modelsummary import get_model_summary
 from lib.utils.utils import create_logger, FullModel, get_rank
 
 from Splicing.data.data_core import SplicingDataset as splicing_dataset
+from Splicing.data.Defacto import DefactoDataset
+
 from pathlib import Path
 from project_config import dataset_paths
 import seaborn as sns; sns.set_theme()
@@ -62,7 +64,7 @@ def main():
     # Instead of using argparse, force these args:
 
     ## CHOOSE ##
-    args = argparse.Namespace(cfg='experiments/CAT_full.yaml', opts=['TEST.MODEL_FILE', 'output/splicing_dataset/CAT_full/CAT_full_v2.pth.tar', 'TEST.FLIP_TEST', 'False', 'TEST.NUM_SAMPLES', '0'])
+    args = argparse.Namespace(cfg='experiments/CAT_full.yaml', opts=['TEST.MODEL_FILE', 'output/splicing_dataset/CAT_full/best.pth.tar', 'TEST.FLIP_TEST', 'False', 'TEST.NUM_SAMPLES', '0'])
     # args = argparse.Namespace(cfg='experiments/CAT_DCT_only.yaml', opts=['TEST.MODEL_FILE', 'output/splicing_dataset/CAT_DCT_only/DCT_only_v2.pth.tar', 'TEST.FLIP_TEST', 'False', 'TEST.NUM_SAMPLES', '0'])
     update_config(config, args)
 
@@ -72,7 +74,14 @@ def main():
     cudnn.enabled = config.CUDNN.ENABLED
 
     ## CHOOSE ##
-    test_dataset = splicing_dataset(crop_size=None, grid_crop=True, blocks=('RGB', 'DCTvol', 'qtable'), DCT_channels=1, mode='arbitrary', read_from_jpeg=True)  # full model
+    test_dataset = DefactoDataset(
+                r"F:\datasets\Defacto_splicing\splicing_3_img\img_jpg",
+                r"F:\datasets\Defacto_splicing\splicing_3_annotations\probe_mask",
+                10000,
+                512,
+                'train',None,
+                blocks=('RGB', 'DCTvol', 'qtable'))
+    # splicing_dataset(crop_size=None, grid_crop=True, blocks=('RGB', 'DCTvol', 'qtable'), DCT_channels=1, mode='arbitrary', read_from_jpeg=True)  # full model
     # test_dataset = splicing_dataset(crop_size=None, grid_crop=True, blocks=('DCTvol', 'qtable'), DCT_channels=1, mode='arbitrary', read_from_jpeg=True)  # DCT stream
 
     print(test_dataset.get_info())
@@ -91,8 +100,7 @@ def main():
                                      min_kept=config.LOSS.OHEMKEEP,
                                      weight=test_dataset.class_weights).cuda()
     else:
-        criterion = CrossEntropy(ignore_label=config.TRAIN.IGNORE_LABEL,
-                                 weight=test_dataset.class_weights).cuda()
+        criterion = CrossEntropy(ignore_label=config.TRAIN.IGNORE_LABEL).cuda()
 
     model = eval('models.' + config.MODEL.NAME +
                  '.get_seg_model')(config)
@@ -112,7 +120,7 @@ def main():
 
 
     def get_next_filename(i):
-        dataset_list = test_dataset.dataset_list
+        dataset_list = [test_dataset]
         it = 0
         while True:
             if i >= len(dataset_list[it]):
@@ -135,8 +143,8 @@ def main():
             pred = pred.cpu().numpy()
 
             # filename
-            filename = os.path.splitext(get_next_filename(index))[0] + ".png"
-            filepath = dataset_paths['SAVE_PRED'] / filename
+            # filename = os.path.splitext(get_next_filename(index))[0] + ".png"
+            filepath = dataset_paths['SAVE_PRED'] / str(index)
 
             # plot
             try:

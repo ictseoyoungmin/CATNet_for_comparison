@@ -13,6 +13,19 @@ import torch
 import random
 import cv2
 
+def fix_seed(random_seed):
+    """
+    fix seed to control any randomness from a code 
+    (enable stability of the experiments' results.)
+    """
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
+    torch.cuda.manual_seed_all(random_seed)  # if use multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+fix_seed(42)
 
 class AbstractDataset(ABC):
     YCbCr2RGB = torch.tensor([[1, 0, 1.402], [1, -0.34414, -.71414], [1, 1.772, 0]], dtype=torch.float64)
@@ -149,7 +162,8 @@ class AbstractDataset(ABC):
             else:
                 s_r = random.randint(0, max(h - crop_size[0], 0))
                 s_c = random.randint(0, max(w - crop_size[1], 0))
-
+            s_r = 0
+            s_c = 0
             # crop img_RGB
             img_RGB = img_RGB[s_r:s_r+crop_size[0], s_c:s_c+crop_size[1], :]
 
@@ -199,10 +213,7 @@ class AbstractDataset(ABC):
         else:
             return tensor, torch.tensor(mask, dtype=torch.long), torch.tensor(qtables[:self.DCT_channels], dtype=torch.float)
 
-    @abstractmethod
-    def get_tamp(self, index):
-        pass
-
+   
     def get_tamp_name(self, index):
         item = self.tamp_list[index]
         if isinstance(item, list):

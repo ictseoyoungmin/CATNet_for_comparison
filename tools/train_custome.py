@@ -31,6 +31,7 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.optim
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader,random_split
 from tensorboardX import SummaryWriter
 
 from lib import models
@@ -103,33 +104,36 @@ def main():
     crop_size = (config.TRAIN.IMAGE_SIZE[1], config.TRAIN.IMAGE_SIZE[0])
     if config.DATASET.DATASET == 'splicing_dataset':
         ## CHOOSE ##
-        train_dataset = splicing_dataset(crop_size=crop_size, grid_crop=True, blocks=('RGB', 'DCTvol', 'qtable'), mode='train', DCT_channels=1, read_from_jpeg=True, class_weight=[0.5, 2.5])  # full model
+        dataset = DefactoDataset(
+                r"F:\datasets\Defacto_splicing\splicing_2_img\img_jpg",
+                r"F:\datasets\Defacto_splicing\splicing_2_annotations\probe_mask",
+                10764,
+                512,
+                'train',None,
+                blocks=('RGB', 'DCTvol', 'qtable'))
+        
+        # DefactoDataset(crop_size=crop_size, grid_crop=True, blocks=('RGB', 'DCTvol', 'qtable'), mode='train', DCT_channels=1, read_from_jpeg=True, class_weight=[0.5, 2.5])  # full model
         # train_dataset = splicing_dataset(crop_size=crop_size, grid_crop=True, blocks=('DCTvol', 'qtable'), mode='train', DCT_channels=1, read_from_jpeg=True, class_weight=[0.5, 2.5])  # only DCT stream
-        logger.info(train_dataset.get_info())
+        logger.info(dataset.get_info())
     else:
         raise ValueError("Not supported dataset type.")
     
     # 수정시작
+    print(dataset._crop_size)
+    
+    train_size =  10000 #int(dataset_size * 0.8)
+    validation_size = 764 #int(dataset_size * 0.2)
 
-    trainloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config.TRAIN.BATCH_SIZE_PER_GPU*len(gpus),
-        shuffle=config.TRAIN.SHUFFLE,
-        num_workers=config.WORKERS,
-        pin_memory=False, )
+    train_dataset, validation_dataset = random_split(dataset, [train_size, validation_size])
+   
+
+    trainloader = DataLoader(train_dataset, batch_size=2, num_workers=0, shuffle=True)
+    validloader = DataLoader(validation_dataset, batch_size=2, num_workers=0, shuffle=False)
+    print("train images len : ",train_dataset.__len__())
+    print("validation images len : ",validation_dataset.__len__())
 
     # validation
     ## CHOOSE ##
-    valid_dataset = splicing_dataset(crop_size=None, grid_crop=True, blocks=('RGB', 'DCTvol', 'qtable'), mode="valid", DCT_channels=1, read_from_jpeg=True)  # full model
-    # valid_dataset = splicing_dataset(crop_size=None, grid_crop=True, blocks=('DCTvol', 'qtable'), mode="valid", DCT_channels=1, read_from_jpeg=True)  # only DCT stream
-
-    validloader = torch.utils.data.DataLoader(
-        valid_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=config.WORKERS,
-        pin_memory=False)
-
     # criterion
     if config.LOSS.USE_OHEM:
         criterion = OhemCrossEntropy(ignore_label=config.TRAIN.IGNORE_LABEL,
@@ -137,14 +141,16 @@ def main():
                                      min_kept=config.LOSS.OHEMKEEP,
                                      weight=train_dataset.class_weights).cuda()
     else:
-        criterion = CrossEntropy(ignore_label=config.TRAIN.IGNORE_LABEL,
-                                 weight=train_dataset.class_weights).cuda()
+        criterion = CrossEntropy(ignore_label=config.TRAIN.IGNORE_LABEL).cuda()
 
     model = FullModel(model, criterion)
 
     # optimizer
-    logger.info(f"# params with requires_grad = {len([c for c in model.parameters() if c.requires_grad])}, "
-                f"# params freezed = {len([c for c in model.parameters() if not c.requires_grad])}")
+    logger.info((f"# params with requires_grad = {len([c for c in model.parameters() if c.requires_grad])}\n",
+                f"# params freezed = {len([c for c in model.parameters() if not c.requires_grad])}\n",
+                '# generator parameters:', 1.0 * sum(param.numel() for param in model.parameters())/1000000))
+
+
     if config.TRAIN.OPTIMIZER == 'sgd':
         optimizer = torch.optim.SGD([{'params':
                                           filter(lambda p: p.requires_grad,
@@ -158,7 +164,7 @@ def main():
     else:
         raise ValueError('Only Support SGD optimizer')
 
-    epoch_iters = np.int(train_dataset.__len__() /
+    epoch_iters = np.int32(train_dataset.__len__() /
                          config.TRAIN.BATCH_SIZE_PER_GPU / len(gpus))
     best_p_mIoU = 0
     last_epoch = 0
@@ -176,7 +182,8 @@ def main():
                         .format(checkpoint['epoch']))
         else:
             logger.info("No previous checkpoint.")
-
+    # print('test here')
+    # return 0 
     start = timeit.default_timer()
     end_epoch = config.TRAIN.END_EPOCH + config.TRAIN.EXTRA_EPOCH
     num_iters = config.TRAIN.END_EPOCH * epoch_iters
@@ -184,7 +191,6 @@ def main():
 
     for epoch in range(last_epoch, end_epoch):
         # train
-        train_dataset.shuffle()  # for class-balanced sampling
         train(config, epoch, config.TRAIN.END_EPOCH,
               epoch_iters, config.TRAIN.LR, num_iters,
               trainloader, optimizer, model, writer_dict, final_output_dir)
@@ -194,7 +200,7 @@ def main():
         time.sleep(3.0)
 
         # Valid
-        if epoch % 10 == 0 or (epoch >= 80 and epoch % 5 == 0) or epoch >= 120:
+        if 1:
             print("Start Validating..")
             writer_dict['valid_global_steps'] = epoch
             valid_loss, mean_IoU, avg_mIoU, avg_p_mIoU, IoU_array, pixel_acc, mean_acc, confusion_matrix = \
@@ -213,7 +219,14 @@ def main():
                     'optimizer': optimizer.state_dict(),
                 }, os.path.join(final_output_dir, 'best.pth.tar'))
                 logger.info("best.pth.tar updated.")
-
+            else:
+                torch.save({
+                    'epoch': epoch + 1,
+                    'best_p_mIoU': best_p_mIoU,
+                    'state_dict': model.model.module.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, os.path.join(final_output_dir, f'chk_{epoch+1}.pth.tar'))
+                logger.info("best.pth.tar updated.")
             msg = '(Valid) Loss: {:.3f}, MeanIU: {: 4.4f}, Best_p_mIoU: {: 4.4f}, avg_mIoU: {: 4.4f}, avg_p_mIoU: {: 4.4f}, Pixel_Acc: {: 4.4f}, Mean_Acc: {: 4.4f}'.format(
                 valid_loss, mean_IoU, best_p_mIoU, avg_mIoU, avg_p_mIoU, pixel_acc, mean_acc)
             logging.info(msg)
